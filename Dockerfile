@@ -10,13 +10,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
 COPY app.py .
-
-# Create database directory
-RUN mkdir -p data
-
-# Build the database if CSV exists
-RUN if [ -f scripts/ddc_sections.csv ]; then python scripts/build_ddc_database.py; fi
-
+COPY ddc_helpers.py .
+COPY ddc_database.db ./data/ddc.db
 # Expose port
 EXPOSE 8000
 
