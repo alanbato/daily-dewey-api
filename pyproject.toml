@@ -1,0 +1,12 @@
+[project]
+name = "daily-dewey-api"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi[standard-no-fastapi-cloud-cli]>=0.116.1",
+    "ruff>=0.12.5",
+    "ty>=0.0.1a16",
+    "uvicorn>=0.35.0",
+]
