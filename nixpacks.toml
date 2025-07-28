@@ -1,2 +1,2 @@
 [start]
-cmd = "uv run fastapi run main.py --port 3000"
+cmd = "python -m fastapi run app.py --port 3000"
