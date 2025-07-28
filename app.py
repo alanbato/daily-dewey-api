@@ -3,7 +3,7 @@
 FastAPI app for Daily Dewey - returns a different DDC section each day
 """
 
-from fastapi import FastAPI, Query, Response
+from fastapi import FastAPI, Query, Response, Request
 from fastapi.responses import JSONResponse
 from datetime import datetime, timezone, timedelta, date
 import hashlib
@@ -11,14 +11,58 @@ import os
 import sys
 from typing import Any
 import re
+import logging
+import json
+import time
 
 from ddc_helpers import DDCDatabase
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('daily_dewey_api.log')
+    ]
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Daily Dewey API",
     description="Get a different Dewey Decimal Classification section each day",
     version="1.0.0",
 )
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Log all HTTP requests and responses"""
+    start_time = time.time()
+    
+    # Log incoming request
+    logger.info(f"🔵 INCOMING REQUEST:")
+    logger.info(f"   Method: {request.method}")
+    logger.info(f"   URL: {request.url}")
+    logger.info(f"   Headers: {dict(request.headers)}")
+    logger.info(f"   Query params: {dict(request.query_params)}")
+    logger.info(f"   Client: {request.client.host if request.client else 'unknown'}")
+    
+    # Process request
+    response = await call_next(request)
+    
+    # Calculate processing time
+    process_time = time.time() - start_time
+    
+    # Log response
+    logger.info(f"🟢 OUTGOING RESPONSE:")
+    logger.info(f"   Status: {response.status_code}")
+    logger.info(f"   Headers: {dict(response.headers)}")
+    logger.info(f"   Processing time: {process_time:.4f}s")
+    
+    # Add processing time to response headers
+    response.headers["X-Process-Time"] = str(process_time)
+    
+    return response
 
 # Initialize database - check multiple possible locations
 db_path = None
@@ -43,14 +87,17 @@ ddc_db = DDCDatabase(db_path)
 @app.on_event("startup")
 async def startup_event():
     """Log startup information"""
-    print(f"Starting Daily Dewey API...")
-    print(f"Database path: {db_path}")
-    print(f"Database exists: {os.path.exists(db_path)}")
+    logger.info("🚀 Starting Daily Dewey API...")
+    logger.info(f"📁 Database path: {db_path}")
+    logger.info(f"✅ Database exists: {os.path.exists(db_path)}")
     try:
         test_section = ddc_db.get_section("0")
-        print(f"Database test: {'OK' if test_section else 'No data found'}")
+        logger.info(f"🔍 Database test: {'OK' if test_section else 'No data found'}")
+        if test_section:
+            logger.info(f"📖 Test section data: {test_section}")
     except Exception as e:
-        print(f"Database test error: {e}")
+        logger.error(f"❌ Database test error: {e}")
+    logger.info("✨ Daily Dewey API ready!")
 
 
 def get_daily_section() -> dict[str, Any]:
@@ -110,9 +157,12 @@ async def get_daily_dewey(
     - hint=3: + main class, division descriptions, and masked section name
     - hint=4: + complete section description (the answer)
     """
+    
+    logger.info(f"💡 Processing daily request with hint level: {hint}")
 
     # Get today's section
     section_data = get_daily_section()
+    logger.info(f"📚 Today's section data: {json.dumps(section_data, indent=2)}")
 
     # Build response - always include the three numeric codes
     result: dict[str, Any] = {
@@ -121,19 +171,26 @@ async def get_daily_dewey(
         "division": str(section_data["division_code"]).zfill(3),
         "section": section_data["section_code"],
     }
+    logger.info(f"🏗️  Base response built: {json.dumps(result, indent=2)}")
 
     # Add hints progressively based on hint level
     if hint >= 1:
         result["main_class_description"] = section_data["main_class_description"]
+        logger.info(f"🔍 Added main class description (hint >= 1)")
 
     if hint >= 2:
         result["division_description"] = section_data["division_description"]
+        logger.info(f"🔍 Added division description (hint >= 2)")
 
     if hint >= 3:
         result["section_masked"] = mask_letters(section_data["section_description"])
+        logger.info(f"🔍 Added masked section (hint >= 3): {result['section_masked']}")
 
     if hint >= 4:
         result["section_description"] = section_data["section_description"]
+        logger.info(f"🔍 Added full section description (hint >= 4)")
+    
+    logger.info(f"📤 Final response: {json.dumps(result, indent=2)}")
 
     # Set aggressive caching headers
     # Cache until midnight UTC
