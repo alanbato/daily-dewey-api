@@ -12,9 +12,6 @@ import sys
 from typing import Any
 import re
 
-# Add scripts directory to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), "scripts"))
-
 from ddc_helpers import DDCDatabase
 
 app = FastAPI(
@@ -23,9 +20,37 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Initialize database
-db_path = os.path.join(os.path.dirname(__file__), "ddc_database.db")
+# Initialize database - check multiple possible locations
+db_path = None
+possible_paths = [
+    os.path.join(os.path.dirname(__file__), "data", "ddc.db"),
+    os.path.join(os.path.dirname(__file__), "ddc_database.db"),
+    "data/ddc.db",
+    "ddc_database.db"
+]
+
+for path in possible_paths:
+    if os.path.exists(path):
+        db_path = path
+        break
+
+if not db_path:
+    raise FileNotFoundError("Could not find DDC database file")
+
 ddc_db = DDCDatabase(db_path)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Log startup information"""
+    print(f"Starting Daily Dewey API...")
+    print(f"Database path: {db_path}")
+    print(f"Database exists: {os.path.exists(db_path)}")
+    try:
+        test_section = ddc_db.get_section("0")
+        print(f"Database test: {'OK' if test_section else 'No data found'}")
+    except Exception as e:
+        print(f"Database test error: {e}")
 
 
 def get_daily_section() -> dict[str, Any]:
@@ -64,12 +89,10 @@ def mask_letters(text: str) -> str:
     return re.sub(r"[a-zA-Z]", "_", text)
 
 
-@app.get("/")
 @app.get("/daily")
 async def get_daily_dewey(
     response: Response,
-    hint: int | None = Query(None, ge=1, le=3, description="Hint level (1-3)"),
-    full: int | None = Query(None, ge=1, le=1, description="Show full information (1)"),
+    hint: int = Query(0, ge=0, le=4, description="Hint level (0-4)"),
 ) -> dict[str, Any]:
     """
     Get today's Dewey Decimal Classification section.
@@ -81,10 +104,11 @@ async def get_daily_dewey(
     - section: 3-digit section code (e.g., "635")
 
     Query parameters:
-    - hint=1: Adds main class description
-    - hint=2: Adds main class and division descriptions
-    - hint=3: Adds main class, division descriptions, and masked section name
-    - full=1: Shows complete information including full section description
+    - hint=0: Just the numeric codes (default)
+    - hint=1: + main class description
+    - hint=2: + main class and division descriptions
+    - hint=3: + main class, division descriptions, and masked section name
+    - hint=4: + complete section description (the answer)
     """
 
     # Get today's section
@@ -98,26 +122,18 @@ async def get_daily_dewey(
         "section": section_data["section_code"],
     }
 
-    # Add hints progressively
-    if hint and hint >= 1:
+    # Add hints progressively based on hint level
+    if hint >= 1:
         result["main_class_description"] = section_data["main_class_description"]
 
-    if hint and hint >= 2:
+    if hint >= 2:
         result["division_description"] = section_data["division_description"]
 
-    if hint and hint >= 3:
+    if hint >= 3:
         result["section_masked"] = mask_letters(section_data["section_description"])
 
-    # Show full information if requested
-    if full == 1:
+    if hint >= 4:
         result["section_description"] = section_data["section_description"]
-        # Also include all other fields if not already present
-        if "main_class_description" not in result:
-            result["main_class_description"] = section_data["main_class_description"]
-        if "division_description" not in result:
-            result["division_description"] = section_data["division_description"]
-        if "section_masked" not in result:
-            result["section_masked"] = mask_letters(section_data["section_description"])
 
     # Set aggressive caching headers
     # Cache until midnight UTC
@@ -132,7 +148,7 @@ async def get_daily_dewey(
     )
     response.headers["Expires"] = midnight.strftime("%a, %d %b %Y %H:%M:%S GMT")
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Vary"] = "hint, full"
+    response.headers["Vary"] = "hint"
 
     return result
 
@@ -140,7 +156,19 @@ async def get_daily_dewey(
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
+    try:
+        # Test database connection
+        test_section = ddc_db.get_section("0")
+        db_status = "connected" if test_section else "no_data"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+    
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "database": db_status,
+        "database_path": db_path
+    }
 
 
 if __name__ == "__main__":
