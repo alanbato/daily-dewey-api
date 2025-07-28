@@ -5,6 +5,7 @@ FastAPI app for Daily Dewey - returns a different DDC section each day
 
 from fastapi import FastAPI, Query, Response, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timezone, timedelta, date
 import hashlib
 import os
@@ -32,6 +33,15 @@ app = FastAPI(
     title="Daily Dewey API",
     description="Get a different Dewey Decimal Classification section each day",
     version="1.0.0",
+)
+
+# Add CORS middleware to allow requests from TRMNL platform
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for now
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.middleware("http")
